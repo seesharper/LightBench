@@ -2,10 +2,18 @@
 using System.Linq;
 using System.Diagnostics;
 using System.Text;
-namespace Lightmark
+namespace LightBench
 {
-    public class Measure
+    public class Benchmark
     {
+        /// <summary>
+        /// Executes the given <see cref="action"/>. 
+        /// </summary>
+        /// <param name="action">A delegate that represents the code to be benchmarked.</param>
+        /// <param name="numberOfRuns">The number of runs to execute.</param>
+        /// <param name="name">The name/description of the benchmark.</param>
+        /// <param name="warmup">Indicates whether we should perform warmup.</param>
+        /// <returns></returns>
         public static Report Run(Action action, int numberOfRuns, string name, bool warmup = true)
         {
             if (warmup)
@@ -14,7 +22,6 @@ namespace Lightmark
             }
 
             double[] times = new double[numberOfRuns];
-
 
             var result = new Report();
             result.MemoryStart = GC.GetTotalMemory(true);
@@ -30,6 +37,7 @@ namespace Lightmark
             sw.Stop();
 
             result.Name = name;
+            result.Times = times;
             result.NumberOfRuns = numberOfRuns;
             result.MemoryEnd = GC.GetTotalMemory(false);
             result.MemoryAfterCollect = GC.GetTotalMemory(true);
@@ -48,11 +56,7 @@ namespace Lightmark
             result.Percentiles[6] = new Percentile() { Value = Percentile(times, 0.98), Percent = 0.98 };
             result.Percentiles[7] = new Percentile() { Value = Percentile(times, 0.99), Percent = 0.99 };
             result.Percentiles[8] = new Percentile() { Value = Percentile(times, 1), Percent = 1.0 };
-
-
-
             return result;
-
         }
 
         private static double CalculateTotal(double[] numbers)
@@ -122,7 +126,7 @@ namespace Lightmark
         public long MemoryEnd;
         public long MemoryAfterCollect;
 
-
+        public double[] Times;    
 
 
         public override string ToString()
@@ -147,7 +151,6 @@ namespace Lightmark
             {
                 sb.AppendLine(percentile.ToString());
             }
-
 
             return sb.ToString();
         }
