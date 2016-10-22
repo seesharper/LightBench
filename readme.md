@@ -1,4 +1,4 @@
-## LightMark
+## LightBench
 
 A super simple benchmark tool for .Net. 
 
