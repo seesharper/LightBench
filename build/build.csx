@@ -2,7 +2,7 @@
 #load "common.csx"
 
 string pathToBuildDirectory = @"tmp/";
-private string version = "1.0.0";
+private string version = "1.1.0";
 
 WriteLine("LightBench version {0}" , version);
 

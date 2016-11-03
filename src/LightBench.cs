@@ -1,10 +1,16 @@
-﻿using System;
-using System.Linq;
-using System.Diagnostics;
-using System.Text;
-namespace LightBench
+﻿namespace LightBench
 {
-    public class Benchmark
+    using System;
+    using System.Collections.Generic;
+    using System.Diagnostics;
+    using System.Linq;
+    using System.Text;
+    using System.Threading;
+
+    /// <summary>
+    /// A super simple benchmarking tool.
+    /// </summary>
+    public static class Benchmark
     {
         /// <summary>
         /// Executes the given <see cref="action"/>. 
@@ -21,57 +27,99 @@ namespace LightBench
                 action();
             }
 
-            double[] times = new double[numberOfRuns];
+            List<double> times = new List<double>();
 
-            var result = new Report();
-            result.MemoryStart = GC.GetTotalMemory(true);
+            var report = StartReport();
+            report.Name = name;
             Stopwatch sw = Stopwatch.StartNew();
             for (int i = 0; i < numberOfRuns; i++)
             {
-                action();
-                times[i] = sw.Elapsed.TotalMilliseconds;
                 sw.Restart();
-
-
+                try
+                {
+                    action();
+                    times.Add(sw.ElapsedMilliseconds);
+                }
+                catch (Exception e)
+                {
+                    report.Exceptions.Add(e);
+                }
+                                
             }
-            sw.Stop();
-
-            result.Name = name;
-            result.Times = times;
-            result.NumberOfRuns = numberOfRuns;
-            result.MemoryEnd = GC.GetTotalMemory(false);
-            result.MemoryAfterCollect = GC.GetTotalMemory(true);
-            result.StandardDeviation = CalculateStandardDeviation(times);
-            result.Total = CalculateTotal(times);
-            result.Longest = CalculateLongest(times);
-            result.Shortest = CalculateShortest(times);
-            result.Mean = CalculateMean(times);
-            result.Percentiles = new Percentile[9];
-            result.Percentiles[0] = new Percentile() { Value = Percentile(times, 0.5), Percent = 0.5 };
-            result.Percentiles[1] = new Percentile() { Value = Percentile(times, 0.66), Percent = 0.66 };
-            result.Percentiles[2] = new Percentile() { Value = Percentile(times, 0.75), Percent = 0.75 };
-            result.Percentiles[3] = new Percentile() { Value = Percentile(times, 0.80), Percent = 0.80 };
-            result.Percentiles[4] = new Percentile() { Value = Percentile(times, 0.90), Percent = 0.90 };
-            result.Percentiles[5] = new Percentile() { Value = Percentile(times, 0.95), Percent = 0.95 };
-            result.Percentiles[6] = new Percentile() { Value = Percentile(times, 0.98), Percent = 0.98 };
-            result.Percentiles[7] = new Percentile() { Value = Percentile(times, 0.99), Percent = 0.99 };
-            result.Percentiles[8] = new Percentile() { Value = Percentile(times, 1), Percent = 1.0 };
-            return result;
+            EndReport(report);
+            CollectResult(times.ToArray(), report);            
+            return report;
+        }
+      
+        /// <summary>
+        /// Monitor a given <param name="action"></param> and calls the <paramref name="render"/> delegate after each run.
+        /// </summary>
+        /// <param name="action">A delegate that represents the code to be benchmarked.</param>
+        /// <param name="duration">A <see cref="TimeSpan"/> that represents how long we should monitor the action.</param>
+        /// <param name="thinkTime">A function that returns a <see cref="TimeSpan"/> that represents the time to "think" between runs.</param>
+        /// <param name="name">A function delegate that returns the name/description of the benchmark.</param>
+        /// <param name="render">An action delegate that passes the current <see cref="Report"/> object allowing it to be rendered.</param>
+        /// <param name="warmup">Indicates whether we should perform warmup.</param>
+        public static void Monitor(Action action, TimeSpan duration, Func<TimeSpan> thinkTime, Func<string> name, Action<Report> render, bool warmup = true)
+        {
+            var startTime = DateTime.Now;
+            
+            if (warmup)
+            {
+                action();
+            }
+            List<double> times = new List<double>();
+            var report = StartReport();
+            report.Duration = duration;            
+            Stopwatch sw = Stopwatch.StartNew();
+            while ((DateTime.Now - startTime) < duration)
+            {
+                try
+                {
+                    sw.Restart();
+                    action();
+                    times.Add(sw.ElapsedMilliseconds);
+                    CollectResult(times.ToArray(), report);
+                    TimeSpan currentThinkTime = thinkTime();
+                    report.ThinkTime = currentThinkTime;
+                    report.Name = name();
+                    render(report);                    
+                    Thread.Sleep(currentThinkTime);
+                }
+                catch (Exception e)
+                {                    
+                   report.Exceptions.Add(e);
+                }
+            }           
+            EndReport(report);
+            render(report);
         }
 
-        private static double CalculateTotal(double[] numbers)
+        private static void EndReport(Report report)
         {
-            return numbers.Sum();
+            report.MemoryEnd = GC.GetTotalMemory(false);
+            report.MemoryAfterCollect = GC.GetTotalMemory(true);
+            report.IsComplete = true;
         }
 
-        private static double CalculateLongest(double[] numbers)
+        private static Report StartReport()
         {
-            return numbers.Max();
+            var report = new Report();
+            report.Started = DateTime.Now;
+            report.MemoryStart = GC.GetTotalMemory(true);
+            return report;
         }
 
-        private static double CalculateShortest(double[] numbers)
+        private static void CollectResult(double[] times, Report report)
         {
-            return numbers.Min();
+            report.Times = times;
+            report.NumberOfRuns = times.Length;
+            report.StandardDeviation = CalculateStandardDeviation(times);
+            report.Total = times.Sum();
+            report.Longest = times.Max();
+            report.Shortest = times.Min();
+            report.Mean = times.Average();
+            report.MemoryCurrent = GC.GetTotalMemory(false);
         }
 
         private static double CalculateStandardDeviation(double[] numbers)
@@ -80,15 +128,81 @@ namespace LightBench
             double sumOfSquaresOfDifferences = numbers.Select(val => (val - average) * (val - average)).Sum();
             double sd = Math.Sqrt(sumOfSquaresOfDifferences / numbers.Length);
             return sd;
+        }     
+    }
+
+    public class Report
+    {
+        public DateTime Started;
+        public TimeSpan Duration;
+        public TimeSpan ThinkTime;        
+        public double Total;
+        public int NumberOfRuns;
+        public double StandardDeviation;        
+        public bool IsComplete;
+        public double Longest;
+        public double Shortest;
+        public double Mean;
+        public string Name;
+        public long MemoryStart;
+        public long MemoryCurrent;
+        public long MemoryEnd;
+        public long MemoryAfterCollect;
+        public readonly List<Exception> Exceptions = new List<Exception>();
+        public double[] Times;
+               
+        public int[] CreateHistogram(int totalBuckets)
+        {
+            var min = Times.Min();
+            var max = Times.Max();
+            int[] buckets = new int[totalBuckets];
+
+            var bucketSize = (max - min) / totalBuckets;
+
+            foreach (var value in Times)
+            {
+                int bucketIndex = 0;
+                if (bucketSize > 0.0)
+                {
+                    bucketIndex = (int)((value - min) / bucketSize);
+                    if (bucketIndex == totalBuckets)
+                    {
+                        bucketIndex--;
+                    }
+                }
+                buckets[bucketIndex]++;
+            }
+            return buckets;
         }
 
-        private static double CalculateMean(double[] numbers)
+        public static int[] NormalizeHistogram(int[] histogram, int resolution)
         {
-            return numbers.Average();
+            var max = histogram.Max();
+            if (max == 0)
+            {
+                return histogram;
+            }
+
+            double normalizeFactor = (double)max/(double)resolution;
+            int[] normalizedValues = new int[histogram.Length];
+
+            for (int i = 0; i < histogram.Length; i++)
+            {
+                int value = histogram[i];
+                int normalizedValue = (int) (value/normalizeFactor);
+                if (normalizedValue == 0 && value > 0)
+                {
+                    normalizedValue = 1;
+                }
+                normalizedValues[i] = normalizedValue;
+            }
+
+            return normalizedValues;
         }
 
-        private static double Percentile(double[] sequence, double excelPercentile)
+        public double Percentile(double excelPercentile)
         {
+            var sequence = Times.ToArray();
             Array.Sort(sequence);
             int N = sequence.Length;
             double n = (N - 1) * excelPercentile + 1;
@@ -98,61 +212,79 @@ namespace LightBench
             double d = n - k;
             return sequence[k - 1] + d * (sequence[k] - sequence[k - 1]);
         }
-    }
-
-    public struct Percentile
-    {
-        public double Percent;
-        public double Value;
-
-        public override string ToString()
-        {
-            return $"{Percent * 100:0}%\t\t{Value:0.00}";
-        }
-    }
-
-
-    public class Report
-    {
-        public double Total;
-        public int NumberOfRuns;
-        public double StandardDeviation;
-        public Percentile[] Percentiles;
-        public double Longest;
-        public double Shortest;
-        public double Mean;
-        public string Name;
-        public long MemoryStart;
-        public long MemoryEnd;
-        public long MemoryAfterCollect;
-
-        public double[] Times;    
-
-
+        
         public override string ToString()
         {
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine($"****** {Name} ******");
-            sb.AppendLine($"Number of runs: {NumberOfRuns}");
-            sb.AppendLine($"Total time: {Total:0.00} ms");
-            sb.AppendLine($"Standard Deviation: {StandardDeviation:0.00} ms");
-            sb.AppendLine($"Mean: {Mean:0.00} ms");
-            sb.AppendLine($"Longest: {Longest:0.00} ms");
-            sb.AppendLine($"Shortest: {Shortest:0.00} ms");
+            sb.AppendLine("*********************");
+            sb.AppendLine(Name);
+            sb.AppendLine("*********************");
+            sb.AppendLine($"Started: {Started}");
+            if (IsComplete)
+            {
+                sb.AppendLine($"Status: Completed ({DateTime.Now})");
+            }
+            else
+            {
+                sb.AppendLine($"Status: Not Completed, thinking for {ThinkTime.TotalSeconds} seconds");
+            }
 
+            sb.AppendLine($"Number of runs: {NumberOfRuns}");
+            sb.AppendLine($"Total time: {Total:0.00} ms");                        
             sb.AppendLine($"------ Memory ------");
-            sb.AppendLine($"Memory (start): {MemoryStart} bytes");
-            sb.AppendLine($"Memory (end): {MemoryEnd} bytes");
-            sb.AppendLine($"Memory (allocated) {MemoryEnd - MemoryStart} bytes");
-            sb.AppendLine($"Memory (after collect): {MemoryAfterCollect} bytes");
+            sb.AppendLine($"Memory (start): \t{MemoryStart} bytes");
+            
+            if (IsComplete)
+            {
+                sb.AppendLine($"Memory (end): \t\t{MemoryEnd} bytes");               
+                sb.AppendLine($"Memory (after collect):\t{MemoryAfterCollect} bytes");
+                sb.AppendLine($"Memory (allocated) \t{MemoryEnd - MemoryStart} bytes");
+            }
+            else
+            {
+                sb.AppendLine($"Memory (current): \t{MemoryCurrent} bytes");
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("------ Frequency Distribution Table------");
+            sb.AppendLine($"Mean: {Mean:0.00} ms +/- {StandardDeviation:0.00} ms");                       
+            sb.AppendLine($"Min: {Shortest:0.00} ms");
+            var histogram = CreateHistogram(10);
+            var normalizedHistogram = NormalizeHistogram(histogram, 50);
+            for (int i = 0; i < normalizedHistogram.Length; i++)
+            {
+                sb.Append($"({histogram[i]})\t").Append('*', normalizedHistogram[i]);
+                sb.AppendLine();
+                
+            }
+            sb.AppendLine($"Max: {Longest:0.00} ms");
+
             sb.AppendLine();
             sb.AppendLine("Percentage of the requests served within a certain time (ms)");
-            foreach (var percentile in Percentiles)
+            double[] percentiles = new[] {0.5, 0.66, 0.75, 0.80, 0.90, 0.95, 0.98, 0.99, 1};
+            foreach (var percentile in percentiles)
             {
-                sb.AppendLine(percentile.ToString());
+                sb.AppendLine($"{percentile*100:0}%\t\t{Percentile(percentile):0.00}");                    
+            }
+
+            if (IsComplete)
+            {
+                sb.AppendLine();
+                sb.AppendLine("Benchmark Completed!");
             }
 
             return sb.ToString();
+        }
+    }
+
+    public static class EnumerableExtensions
+    {
+        public static T PickRandomItem<T>(this IEnumerable<T> enumerable)
+        {
+            var random = new Random();
+            var array = enumerable.ToArray();
+            int index = random.Next(array.Length - 1);
+            return array[index];
         }
     }
 }
