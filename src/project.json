@@ -4,7 +4,7 @@
   "authors": [
     "Bernhard Richter"
   ],
-  "version": "1.1.0",
+  "version": "1.1.1",
   "name" : "LightBench",
   "buildOptions": {
     "debugType": "portable"
